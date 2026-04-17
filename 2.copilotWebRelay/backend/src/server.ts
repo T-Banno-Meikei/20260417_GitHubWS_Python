@@ -46,8 +46,10 @@ wss.on("connection", async (ws: WebSocket) => {
     const client = new CopilotClient();
     await client.start();
 
+    const model = process.env.COPILOT_MODEL ?? "gpt-5.4";
     const session = await client.createSession({
-      model: "gpt-5",
+      model,
+      streaming: true,
       onPermissionRequest: approveAll,
     });
 
