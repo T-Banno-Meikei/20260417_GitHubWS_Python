@@ -1,0 +1,4 @@
+flask
+flask-sock
+github-copilot-sdk
+python-dotenv

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pomodoro Timer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="hero">
+        <p class="eyebrow">Phase 0</p>
+        <h1>Pomodoro Timer</h1>
+        <p class="lead">
+          Flaskで画面を配信し、静的アセットを読み込むための土台です。
+          ここからタイマーUIとロジックを段階的に実装します。
+        </p>
+      </header>
+
+      <section class="surface" aria-labelledby="layout-heading">
+        <div class="surface-header">
+          <h2 id="layout-heading">Layout Frame</h2>
+          <span class="status">Ready for UI mock</span>
+        </div>
+
+        <div class="frame-grid">
+          <section class="panel panel-display" aria-label="Timer display placeholder">
+            <p class="panel-label">Timer Display</p>
+            <div class="timer-placeholder">25:00</div>
+          </section>
+
+          <section class="panel panel-controls" aria-label="Controls placeholder">
+            <p class="panel-label">Controls</p>
+            <div class="button-row">
+              <button type="button">Start</button>
+              <button type="button">Pause</button>
+              <button type="button">Reset</button>
+            </div>
+          </section>
+
+          <section class="panel panel-settings" aria-label="Settings placeholder">
+            <p class="panel-label">Settings</p>
+            <ul>
+              <li>Focus minutes</li>
+              <li>Short break minutes</li>
+              <li>Long break minutes</li>
+              <li>Long break interval</li>
+            </ul>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  </body>
+</html>

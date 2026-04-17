@@ -1,0 +1,15 @@
+{
+  "name": "copilot-web-relay-py",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Chat Web Application powered by GitHub Copilot SDK (Python + Flask)",
+  "scripts": {
+    "dev": "concurrently --names \"backend,frontend\" --prefix-colors \"cyan,green\" \"python backend/app.py\" \"npm run dev --prefix frontend\"",
+    "install:frontend": "npm install --prefix frontend",
+    "start:backend": "python backend/app.py",
+    "start:frontend": "npm run dev --prefix frontend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
