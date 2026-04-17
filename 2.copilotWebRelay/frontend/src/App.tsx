@@ -9,7 +9,18 @@ interface Message {
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
-const WS_URL = 'ws://localhost:3001'
+function getWsUrl(): string {
+  const { hostname, protocol } = window.location
+  const wsProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
+  // GitHub Codespaces: {codespace-name}-{port}.app.github.dev
+  if (hostname.includes('.app.github.dev')) {
+    const backendHost = hostname.replace(/-\d+\.app\.github\.dev$/, '-3001.app.github.dev')
+    return `${wsProtocol}//${backendHost}`
+  }
+  return 'ws://localhost:3001'
+}
+
+const WS_URL = getWsUrl()
 
 function App() {
   const [messages, setMessages] = useState<Message[]>([])
