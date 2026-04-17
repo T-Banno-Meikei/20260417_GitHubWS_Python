@@ -96,6 +96,30 @@ function App() {
     }
   }, [connect])
 
+  const hasTranscript = messages.length > 0 || Boolean(streamingContent)
+
+  const handleDownloadTranscript = useCallback(() => {
+    const transcriptMessages = streamingContent
+      ? [...messages, { role: 'assistant' as const, content: streamingContent }]
+      : messages
+
+    if (transcriptMessages.length === 0) return
+
+    const transcript = transcriptMessages
+      .map((msg) => `${msg.role === 'user' ? 'あなた' : 'AI'}:\n${msg.content}`)
+      .join('\n\n---\n\n')
+
+    const blob = new Blob([transcript], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `chat-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }, [messages, streamingContent])
+
   const handleSend = useCallback(
     (content: string) => {
       if (!content.trim() || isSending) return
@@ -123,9 +147,18 @@ function App() {
     <div className="app">
       <header className="app-header">
         <h1>Copilot Chat</h1>
-        <div className={`connection-status status-${connectionStatus}`}>
-          <span className="status-dot" />
-          {statusLabel[connectionStatus]}
+        <div className="header-actions">
+          <button
+            className="download-btn"
+            onClick={handleDownloadTranscript}
+            disabled={!hasTranscript}
+          >
+            会話を保存
+          </button>
+          <div className={`connection-status status-${connectionStatus}`}>
+            <span className="status-dot" />
+            {statusLabel[connectionStatus]}
+          </div>
         </div>
       </header>
 
