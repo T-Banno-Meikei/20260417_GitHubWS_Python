@@ -1,93 +1,128 @@
+"""
+Flask + flask-sock による AI チャットバックエンド
+
+アーキテクチャ:
+  - flask-sock が WebSocket 接続を担当（gevent 不使用）
+  - Copilot SDK の呼び出しは専用 asyncio ループ（バックグラウンドスレッド）で実行
+  - スレッドセーフな Queue で Flask スレッドと asyncio を橋渡し
+"""
+
 import asyncio
+import concurrent.futures
 import json
 import os
+import queue as thread_queue
+import threading
+
+from dotenv import load_dotenv
 from flask import Flask
 from flask_sock import Sock
 from copilot import CopilotClient
 from copilot.session import PermissionHandler
 from copilot.generated.session_events import SessionEventType
 
+load_dotenv()
+
 app = Flask(__name__)
 sock = Sock(app)
 
-
-def send_ws(ws, data: dict):
-    """スレッドセーフなWebSocket送信"""
-    try:
-        ws.send(json.dumps(data, ensure_ascii=False))
-    except Exception:
-        pass
+# ── 専用 asyncio イベントループ（バックグラウンドスレッドで常時起動） ──────────
+_loop = asyncio.new_event_loop()
+_loop_thread = threading.Thread(target=_loop.run_forever, daemon=True)
+_loop_thread.start()
 
 
-@sock.route('/')
+def _run_coro(coro):
+    """バックグラウンドの asyncio ループでコルーチンを実行し結果を返す"""
+    future = asyncio.run_coroutine_threadsafe(coro, _loop)
+    return future.result()
+
+
+# ── HTTP ヘルスチェック ────────────────────────────────────────────────────────
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ── WebSocket エンドポイント ───────────────────────────────────────────────────
+@sock.route("/")
 def chat(ws):
-    asyncio.run(_handle_ws(ws))
+    send_q: thread_queue.Queue = thread_queue.Queue()
 
+    # asyncio ループ内でセッションを生成
+    async def create_session():
+        client = CopilotClient()
+        await client.start()
+        model = os.environ.get("COPILOT_MODEL", "gpt-5.4")
+        session = await client.create_session(
+            model=model,
+            streaming=True,
+            on_permission_request=PermissionHandler.approve_all,
+        )
 
-async def _handle_ws(ws):
-    loop = asyncio.get_event_loop()
-    queue: asyncio.Queue = asyncio.Queue()
-    ws_closed = asyncio.Event()
+        def on_event(event) -> None:
+            if event.type == SessionEventType.ASSISTANT_MESSAGE_DELTA:
+                send_q.put({"type": "delta", "content": event.data.delta_content or ""})
+            elif event.type == SessionEventType.SESSION_IDLE:
+                send_q.put({"type": "done"})
 
-    async def receive_loop():
-        """バックグラウンドでWebSocketメッセージを受信"""
-        while not ws_closed.is_set():
+        session.on(on_event)
+        print(f"[Copilot] session ready: {session.session_id}, model={model}", flush=True)
+        return client, session
+
+    try:
+        client, session = _run_coro(create_session())
+    except Exception as exc:
+        try:
+            ws.send(json.dumps({"type": "error", "message": str(exc)}))
+        except Exception:
+            pass
+        return
+
+    # sender スレッド: send_q → WebSocket
+    def sender_worker():
+        while True:
+            item = send_q.get()
+            if item is None:
+                break
             try:
-                raw = await loop.run_in_executor(None, ws.receive)
-                if raw is None:
-                    break
-                await queue.put(raw)
+                ws.send(json.dumps(item, ensure_ascii=False))
             except Exception:
                 break
-        ws_closed.set()
-        await queue.put(None)  # センチネル
 
-    receive_task = asyncio.create_task(receive_loop())
+    sender_thread = threading.Thread(target=sender_worker, daemon=True)
+    sender_thread.start()
 
+    # メインループ: WebSocket → Copilot
     try:
-        model = os.environ.get("COPILOT_MODEL", "gpt-5.4")
-        async with CopilotClient() as client:
-            session = await client.create_session(
-                model=model,
-                streaming=True,
-                on_permission_request=PermissionHandler.approve_all,
-            )
-
-            def on_event(event):
-                if event.type == SessionEventType.ASSISTANT_MESSAGE_DELTA:
-                    send_ws(ws, {"type": "delta", "content": event.data.delta_content or ""})
-                elif event.type == SessionEventType.SESSION_IDLE:
-                    send_ws(ws, {"type": "done"})
-
-            session.on(on_event)
-
-            print(f"Copilot session ready: {session.session_id}, model={model}")
-
-            while True:
-                raw = await queue.get()
-                if raw is None:
-                    break
-
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    send_ws(ws, {"type": "error", "message": "Invalid JSON"})
-                    continue
-
-                if msg.get("type") == "message" and msg.get("content"):
-                    await session.send(msg["content"])
-
-            await session.disconnect()
-
-    except Exception as e:
-        send_ws(ws, {"type": "error", "message": str(e)})
+        while True:
+            raw = ws.receive()
+            if raw is None:
+                break
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                ws.send(json.dumps({"type": "error", "message": "Invalid JSON"}))
+                continue
+            if msg.get("type") == "message" and msg.get("content"):
+                asyncio.run_coroutine_threadsafe(
+                    session.send(msg["content"]), _loop
+                )
     finally:
-        receive_task.cancel()
         try:
-            await receive_task
-        except asyncio.CancelledError:
+            _run_coro(session.disconnect())
+        except Exception:
             pass
+        try:
+            _run_coro(client.stop())
+        except Exception:
+            pass
+        send_q.put(None)
+        sender_thread.join(timeout=3)
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    port = int(os.environ.get("PORT", 5000))
+    print(f" * Running on http://0.0.0.0:{port} (flask-sock / threaded)", flush=True)
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+
